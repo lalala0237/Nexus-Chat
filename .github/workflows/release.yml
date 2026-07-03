@@ -1,0 +1,98 @@
+name: Build and Release Nexus-Chat
+
+# 触发条件：当推送带有 v 开头的 Tag（如 v1.0.1）时触发
+on:
+  push:
+    tags:
+      - 'v*.*.*'
+
+jobs:
+  # 1. 打包 Windows 版本
+  build-windows:
+    runs-on: windows-latest
+    steps:
+      - name: Checkout Code
+        uses: actions/checkout@v3
+        
+      - name: Set up Python
+        uses: actions/setup-python@v4
+        with:
+          python-version: '3.11'
+          
+      - name: Install Briefcase & Build
+        run: |
+          pip install briefcase
+          briefcase create windows VisualStudio
+          briefcase build windows VisualStudio
+          briefcase package windows VisualStudio
+          
+      - name: Upload Windows Artifact
+        uses: actions/upload-artifact@v3
+        with:
+          name: windows-build
+          path: dist/*.msi
+
+  # 2. 打包 macOS 版本
+  build-macos:
+    runs-on: macos-latest
+    steps:
+      - name: Checkout Code
+        uses: actions/checkout@v3
+        
+      - name: Set up Python
+        uses: actions/setup-python@v4
+        with:
+          python-version: '3.11'
+          
+      - name: Install Briefcase & Build
+        run: |
+          pip install briefcase
+          briefcase create macos Xcode
+          briefcase build macos Xcode
+          briefcase package macos Xcode
+          
+      - name: Upload macOS Artifact
+        uses: actions/upload-artifact@v3
+        with:
+          name: macos-build
+          path: dist/*.dmg
+
+  # 3. 发布 Release 并更新 NC-Updater
+  release-and-update:
+    needs: [build-windows, build-macos]
+    runs-on: ubuntu-latest
+    steps:
+      - name: Download All Artifacts
+        uses: actions/download-artifact@v3
+        
+      - name: Create GitHub Release
+        uses: softprops/action-gh-release@v1
+        with:
+          files: |
+            windows-build/*.msi
+            macos-build/*.dmg
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Update NC-Updater version.json
+        run: |
+          git clone https://github.com/lalala0237/NC-Updater.git updater-repo
+          cd updater-repo
+          
+          # 使用 Python 修改版本号
+          python3 -c "
+          import json
+          with open('version.json', 'r') as f: data = json.load(f)
+          data['latest_version'] = '${{ github.ref_name }}'
+          with open('version.json', 'w') as f: json.dump(data, f, indent=2)
+          "
+          
+          # 提交并推送到 NC-Updater 仓库
+          git config user.name "GitHub Actions"
+          git config user.email "actions@github.com"
+          git add version.json
+          git commit -m "Auto-update version to ${{ github.ref_name }}"
+          git push
+        env:
+          # 使用你刚才生成的 PAT Token 进行跨仓库推送
+          GITHUB_TOKEN: ${{ secrets.PAT_TOKEN }}
