@@ -74,7 +74,7 @@ jobs:
           # 创建并打包 Android Debug 版本
           briefcase create android
           briefcase build android
-          briefcase package android --format apk
+          briefcase package android --p apk
 
       # 👇👇👇 关键修改：调试与上传 👇👇👇
       - name: Find APK file
