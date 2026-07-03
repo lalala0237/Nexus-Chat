@@ -1,97 +1,45 @@
 name: Build and Release Nexus-Chat
 
-# 触发条件：当推送带有 v 开头的 Tag（如 v1.0.1）时触发
 on:
   push:
     tags:
       - 'v*.*.*'
 
 jobs:
-  # 1. 打包 Windows 版本
   build-windows:
     runs-on: windows-latest
     steps:
       - name: Checkout Code
-        uses: actions/checkout@v4  # ✅ 已更新
-        
+        uses: actions/checkout@v4
       - name: Set up Python
-        uses: actions/setup-python@v5 # ✅ 建议更新到 v5
+        uses: actions/setup-python@v5
         with:
-          python-version: '3.13' # ✅ 已更新为你的本地版本
-          
-      - name: Install Briefcase & Build
-        run: |
-          pip install briefcase
-          briefcase create windows VisualStudio
-          briefcase build windows VisualStudio
-          briefcase package windows VisualStudio
-          
-      - name: Upload Windows Artifact
-        uses: actions/upload-artifact@v4 # ✅ 关键修复：v3 -> v4
+          python-version: '3.13'
+      - name: Install Briefcase
+        run: pip install briefcase
+      - name: Build Windows Installer
+        run: briefcase create && briefcase build && briefcase package
+      - name: Upload Artifact
+        uses: actions/upload-artifact@v4
         with:
-          name: windows-build
+          name: nexus-chat-windows
           path: dist/*.msi
 
-  # 2. 打包 macOS 版本
   build-macos:
     runs-on: macos-latest
     steps:
       - name: Checkout Code
-        uses: actions/checkout@v4 # ✅ 已更新
-        
+        uses: actions/checkout@v4
       - name: Set up Python
-        uses: actions/setup-python@v5 # ✅ 建议更新到 v5
+        uses: actions/setup-python@v5
         with:
-          python-version: '3.13' # ✅ 已更新为你的本地版本
-          
-      - name: Install Briefcase & Build
-        run: |
-          pip install briefcase
-          briefcase create macos Xcode
-          briefcase build macos Xcode
-          briefcase package macos Xcode
-          
-      - name: Upload macOS Artifact
-        uses: actions/upload-artifact@v4 # ✅ 关键修复：v3 -> v4
+          python-version: '3.13'
+      - name: Install Briefcase
+        run: pip install briefcase
+      - name: Build macOS App
+        run: briefcase create && briefcase build && briefcase package
+      - name: Upload Artifact
+        uses: actions/upload-artifact@v4
         with:
-          name: macos-build
+          name: nexus-chat-macos
           path: dist/*.dmg
-
-  # 3. 发布 Release 并更新 NC-Updater
-  release-and-update:
-    needs: [build-windows, build-macos]
-    runs-on: ubuntu-latest
-    steps:
-      - name: Download All Artifacts
-        uses: actions/download-artifact@v4 # ✅ 关键修复：v3 -> v4
-        
-      - name: Create GitHub Release
-        uses: softprops/action-gh-release@v1
-        with:
-          files: |
-            windows-build/*.msi
-            macos-build/*.dmg
-        env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-
-      - name: Update NC-Updater version.json
-        run: |
-          git clone https://github.com/lalala0237/NC-Updater.git updater-repo
-          cd updater-repo
-          
-          # 使用 Python 修改版本号
-          python3 -c "
-          import json
-          with open('version.json', 'r') as f: data = json.load(f)
-          data['latest_version'] = '${{ github.ref_name }}'
-          with open('version.json', 'w') as f: json.dump(data, f, indent=2)
-          "
-          
-          # 提交并推送到 NC-Updater 仓库
-          git config user.name "GitHub Actions"
-          git config user.email "actions@github.com"
-          git add version.json
-          git commit -m "Auto-update version to ${{ github.ref_name }}"
-          git push
-        env:
-          GITHUB_TOKEN: ${{ secrets.PAT_TOKEN }}
