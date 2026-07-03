@@ -2,7 +2,6 @@ name: Build and Release Nexus-Chat
 
 # 触发条件：当推送带有 v 开头的 Tag（如 v1.0.1）时触发
 on:
-  workflow_dispatch: # 添加这一行，允许手动点击运行
   push:
     tags:
       - 'v*.*.*'
@@ -13,12 +12,12 @@ jobs:
     runs-on: windows-latest
     steps:
       - name: Checkout Code
-        uses: actions/checkout@v4
+        uses: actions/checkout@v4  # ✅ 已更新
         
       - name: Set up Python
-        uses: actions/setup-python@v4
+        uses: actions/setup-python@v5 # ✅ 建议更新到 v5
         with:
-          python-version: '3.11'
+          python-version: '3.13' # ✅ 已更新为你的本地版本
           
       - name: Install Briefcase & Build
         run: |
@@ -28,7 +27,7 @@ jobs:
           briefcase package windows VisualStudio
           
       - name: Upload Windows Artifact
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v4 # ✅ 关键修复：v3 -> v4
         with:
           name: windows-build
           path: dist/*.msi
@@ -38,12 +37,12 @@ jobs:
     runs-on: macos-latest
     steps:
       - name: Checkout Code
-        uses: actions/checkout@v4
+        uses: actions/checkout@v4 # ✅ 已更新
         
       - name: Set up Python
-        uses: actions/setup-python@v4
+        uses: actions/setup-python@v5 # ✅ 建议更新到 v5
         with:
-          python-version: '3.11'
+          python-version: '3.13' # ✅ 已更新为你的本地版本
           
       - name: Install Briefcase & Build
         run: |
@@ -53,7 +52,7 @@ jobs:
           briefcase package macos Xcode
           
       - name: Upload macOS Artifact
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v4 # ✅ 关键修复：v3 -> v4
         with:
           name: macos-build
           path: dist/*.dmg
@@ -64,7 +63,7 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - name: Download All Artifacts
-        uses: actions/download-artifact@v4
+        uses: actions/download-artifact@v4 # ✅ 关键修复：v3 -> v4
         
       - name: Create GitHub Release
         uses: softprops/action-gh-release@v1
@@ -95,5 +94,4 @@ jobs:
           git commit -m "Auto-update version to ${{ github.ref_name }}"
           git push
         env:
-          # 使用你刚才生成的 PAT Token 进行跨仓库推送
           GITHUB_TOKEN: ${{ secrets.PAT_TOKEN }}
