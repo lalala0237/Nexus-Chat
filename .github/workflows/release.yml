@@ -38,7 +38,7 @@ jobs:
       - name: Install Briefcase
         run: pip install briefcase
       - name: Build macOS App
-        run: briefcase create && briefcase build && briefcase package
+        run: briefcase create && briefcase build && briefcase package --no-sign
       - name: Upload Artifact
         uses: actions/upload-artifact@v4
         with:
