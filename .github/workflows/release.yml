@@ -1,6 +1,7 @@
 name: Build and Release Nexus-Chat
 
 on:
+  workflow_dispatch:  # 允许在网页上手动点击运行
   push:
     tags:
       - 'v*.*.*'
