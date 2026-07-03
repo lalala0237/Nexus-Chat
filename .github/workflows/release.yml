@@ -54,30 +54,41 @@ jobs:
           path: dist/*.dmg
 
   # ================= Android 构建 (新增) =================
+    # ================= Android 构建 =================
   build-android:
     runs-on: ubuntu-latest
     steps:
       - name: Checkout Code
         uses: actions/checkout@v4
+
       - name: Set up Python
         uses: actions/setup-python@v5
         with:
-          python-version: '3.13'
+          python-version: '3.12' # 推荐用稳定的 3.12
+
       - name: Install Briefcase
         run: pip install briefcase
-      
-      # Android 需要 Java 环境，Briefcase 会自动处理 Gradle，但我们需要确保环境干净
-      - name: Build Android APK
+
+      - name: Build Android App
         run: |
+          # 创建并打包 Android Debug 版本
           briefcase create android
           briefcase build android
-          briefcase package android
-          
-      - name: Upload Artifact
+          briefcase package android --format apk
+
+      # 👇👇👇 关键修改：调试与上传 👇👇👇
+      - name: Find APK file
+        run: |
+          echo "正在查找生成的 APK 文件..."
+          # 使用 find 命令在整个构建目录下寻找 .apk 文件
+          find build -name "*.apk" 
+          # 将找到的第一个 apk 复制到根目录，方便上传
+          cp $(find build -name "*.apk" | head -n 1) Nexus-Chat-Android.apk || echo "未找到APK"
+
+      - name: Upload Android Artifact
         uses: actions/upload-artifact@v4
         with:
-          name: nexus-chat-android
-          # Android 打包出来通常是 apk，路径可能在 build 或 dist 下，视版本而定
-          path: |
-            dist/*.apk
-            build/nexus-chat/android/gradle/app/build/outputs/apk/debug/*.apk
+          name: Nexus-Chat-Android
+          # 直接上传刚才复制出来的文件，或者用更宽泛的路径
+          path: Nexus-Chat-Android.apk 
+          if-no-files-found: error # 如果没找到文件就报错，不要静默失败
