@@ -1,12 +1,13 @@
 name: Build and Release Nexus-Chat
 
 on:
-  workflow_dispatch:  # 允许在网页上手动点击运行
+  workflow_dispatch: # 允许手动点击运行
   push:
     tags:
       - 'v*.*.*'
 
 jobs:
+  # ================= Windows 构建 =================
   build-windows:
     runs-on: windows-latest
     steps:
@@ -26,6 +27,7 @@ jobs:
           name: nexus-chat-windows
           path: dist/*.msi
 
+  # ================= macOS 构建 (已修复签名问题) =================
   build-macos:
     runs-on: macos-latest
     steps:
@@ -37,10 +39,45 @@ jobs:
           python-version: '3.13'
       - name: Install Briefcase
         run: pip install briefcase
+      
+      # 【关键修复】告诉 Briefcase 不要尝试签名，否则 CI 会报错 214
+      - name: Disable macOS Signing
+        run: |
+          echo "BRIEFCASE_NO_SIGN=1" >> $GITHUB_ENV
+          
       - name: Build macOS App
-        run: briefcase create && briefcase build && briefcase package --no-sign
+        run: briefcase create && briefcase build && briefcase package --adhoc-sign
       - name: Upload Artifact
         uses: actions/upload-artifact@v4
         with:
           name: nexus-chat-macos
           path: dist/*.dmg
+
+  # ================= Android 构建 (新增) =================
+  build-android:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout Code
+        uses: actions/checkout@v4
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.13'
+      - name: Install Briefcase
+        run: pip install briefcase
+      
+      # Android 需要 Java 环境，Briefcase 会自动处理 Gradle，但我们需要确保环境干净
+      - name: Build Android APK
+        run: |
+          briefcase create android
+          briefcase build android
+          briefcase package android
+          
+      - name: Upload Artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: nexus-chat-android
+          # Android 打包出来通常是 apk，路径可能在 build 或 dist 下，视版本而定
+          path: |
+            dist/*.apk
+            build/nexus-chat/android/gradle/app/build/outputs/apk/debug/*.apk
