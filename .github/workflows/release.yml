@@ -242,7 +242,7 @@ jobs:
       - name: Push version files to NC-Updater
         uses: cpina/github-action-push-to-another-repository@main
         env:
-          GITHUB_TOKEN: ${{ secrets.UPDATER_REPO_TOKEN }}
+          API_TOKEN_GITHUB: ${{ secrets.UPDATER_REPO_TOKEN }}
         with:      
           source-directory: '.'    
           destination-github-username: 'lalala0237'    
@@ -250,4 +250,6 @@ jobs:
           target-branch: 'main'      
           commit-message: "chore: update version files to ${{ steps.get_version.outputs.tag }}"        
           user-email: github-actions[bot]@users.noreply.github.com      
-          user-name: github-actions[bot]      
+          user-name: github-actions[bot]
+          # 添加这一行，这是关键！
+          target-repository-token: ${{ secrets.UPDATER_REPO_TOKEN }}
