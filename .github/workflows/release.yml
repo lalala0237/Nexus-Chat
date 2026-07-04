@@ -39,12 +39,12 @@ jobs:
           python-version: '3.13'
       - name: Install Briefcase
         run: pip install briefcase
-      
+
       # 【关键修复】告诉 Briefcase 不要尝试签名，否则 CI 会报错 214
       - name: Disable macOS Signing
         run: |
           echo "BRIEFCASE_NO_SIGN=1" >> $GITHUB_ENV
-          
+
       - name: Build macOS App
         run: briefcase create && briefcase build && briefcase package --adhoc-sign
       - name: Upload Artifact
@@ -53,8 +53,7 @@ jobs:
           name: nexus-chat-macos
           path: dist/*.dmg
 
-  # ================= Android 构建 (新增) =================
-    # ================= Android 构建 =================
+  # ================= Android 构建 =================
   build-android:
     runs-on: ubuntu-latest
     steps:
@@ -81,7 +80,7 @@ jobs:
         run: |
           echo "正在查找生成的 APK 文件..."
           # 使用 find 命令在整个构建目录下寻找 .apk 文件
-          find build -name "*.apk" 
+          find build -name "*.apk"
           # 将找到的第一个 apk 复制到根目录，方便上传
           cp $(find build -name "*.apk" | head -n 1) Nexus-Chat-Android.apk || echo "未找到APK"
 
@@ -90,5 +89,165 @@ jobs:
         with:
           name: Nexus-Chat-Android
           # 直接上传刚才复制出来的文件，或者用更宽泛的路径
-          path: Nexus-Chat-Android.apk 
+          path: Nexus-Chat-Android.apk
           if-no-files-found: error # 如果没找到文件就报错，不要静默失败
+
+  # ================= 生成版本文件并推送到 NC-Updater =================
+  generate-version-files:
+    needs: [build-windows, build-macos, build-android]
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout Code
+        uses: actions/checkout@v4
+
+      # ---------- 解析版本号 ----------
+      - name: Get version info
+        id: get_version
+        run: |
+          TAG="${{ github.ref }}"
+          TAG=${TAG##*/}
+          VERSION=${TAG#v}
+          if [[ $VERSION == *-* ]]; then
+            echo "is_prerelease=true" >> $GITHUB_OUTPUT
+          else
+            echo "is_prerelease=false" >> $GITHUB_OUTPUT
+          fi
+          echo "version=$VERSION" >> $GITHUB_OUTPUT
+          echo "tag=$TAG" >> $GITHUB_OUTPUT
+
+      # ---------- 生成 version.json ----------
+      - name: Generate version.json
+        run: |
+          VERSION="${{ steps.get_version.outputs.version }}"
+          TAG="${{ steps.get_version.outputs.tag }}"
+          REPO="${{ github.repository }}"
+          NOW=$(TZ=Asia/Shanghai date '+%Y-%m-%d %H:%M:%S CST')
+
+          cat > version.json << EOF
+          {
+            "latest_version": "$VERSION",
+            "release_date": "$NOW",
+            "release_notes": "Release $VERSION",
+            "downloads": {
+              "windows": "https://github.com/$REPO/releases/download/$TAG/NexusChat-$VERSION.msi",
+              "macos": "https://github.com/$REPO/releases/download/$TAG/NexusChat-$VERSION.dmg",
+              "android": "https://github.com/$REPO/releases/download/$TAG/Nexus-Chat-Android.apk"
+            }
+          }
+          EOF
+
+      # ---------- 拉取旧的历史版本文件 ----------
+      - name: Fetch existing version_history.json
+        run: |
+          curl -sf "https://lalala0237.github.io/NC-Updater/version_history.json" \
+            -o old_history.json 2>/dev/null || echo "" > old_history.json
+
+      # ---------- 生成带注释的 version_history.json ----------
+      - name: Generate version_history.json
+        run: |
+          VERSION="${{ steps.get_version.outputs.version }}"
+          TAG="${{ steps.get_version.outputs.tag }}"
+          REPO="${{ github.repository }}"
+          NOW=$(TZ=Asia/Shanghai date '+%Y-%m-%d %H:%M:%S CST')
+          IS_PRE="${{ steps.get_version.outputs.is_prerelease }}"
+
+          if [ "$IS_PRE" = "true" ]; then
+            VER_TYPE="预发布版本 (Prerelease)"
+            VER_WARN="// ⚠️  注意：此版本为预发布版本，可能包含未修复的 Bug，仅供测试使用"
+          else
+            VER_TYPE="正式版本 (Stable)"
+            VER_WARN="// ✅ 此版本为正式发布版本，推荐所有用户更新"
+          fi
+
+          # --- 写入文件头注释 ---
+          cat > version_history.json << 'HEADER'
+          // ====================================================================
+          //  Nexus Chat - 版本发布历史记录文件 (Version Release History)
+          // ====================================================================
+          //
+          //  【文件用途】
+          //    本文件完整记录了 Nexus Chat 项目自首次发布以来的所有版本发布信息，
+          //    包括正式版本（Stable）和预发布版本（Prerelease / Beta / RC）。
+          //    供客户端「历史版本」页面展示，以及版本回溯、问题排查使用。
+          //
+          //  【文件维护方式】
+          //    本文件由 GitHub Actions 自动化工作流 (release.yml) 在每次成功构建
+          //    并创建 Release 后自动更新。请勿手动编辑本文件，手动修改将在下次
+          //    自动发布时被覆盖。
+          //
+          //  【文件格式说明】
+          //    - 文件顶部的 "//" 开头行为注释，不会被 JSON 解析器读取
+          //    - JSON 数据部分（"history" 数组）为纯 JSON，可被标准解析器正常读取
+          //    - 客户端 updater.py 使用正则去除 "//" 注释行后再进行 JSON 解析
+          //
+          //  【字段说明】
+          //    - version        : 版本号（SemVer 2.0.0，格式 x.y.z 或 x.y.z-pre）
+          //    - release_date   : 发布时间（北京时间 UTC+8）
+          //    - is_prerelease  : 是否为预发布版本（true / false）
+          //    - tag_name       : 对应的 Git Tag 名称
+          //    - release_page   : GitHub Release 页面链接
+          //    - downloads      : 各平台下载链接
+          //
+          // ====================================================================
+
+          HEADER
+
+          # --- 写入当前版本的注释块 ---
+          cat >> version_history.json << EOF
+          // --------------------------------------------------------------------
+          //  版本: $TAG ($VER_TYPE)
+          //  发布时间: $NOW
+          //  Git Tag: $TAG
+          //  构建仓库: $REPO
+          $VER_WARN
+          // --------------------------------------------------------------------
+          EOF
+
+          # --- 写入 JSON 数据：当前版本条目 ---
+          cat >> version_history.json << EOF
+          {
+            "history": [
+              {
+                "version": "$VERSION",
+                "release_date": "$NOW",
+                "is_prerelease": $IS_PRE,
+                "tag_name": "$TAG",
+                "release_page": "https://github.com/$REPO/releases/tag/$TAG",
+                "downloads": {
+                  "windows": "https://github.com/$REPO/releases/download/$TAG/NexusChat-$VERSION.msi",
+                  "macos": "https://github.com/$REPO/releases/download/$TAG/NexusChat-$VERSION.dmg",
+                  "android": "https://github.com/$REPO/releases/download/$TAG/Nexus-Chat-Android.apk"
+                }
+              }
+          EOF
+
+          # --- 合并旧的历史版本条目 ---
+          if [ -s old_history.json ]; then
+            # 去除注释行，提取旧 history 数组内容，拼接到新文件
+            grep -v '^\s*//' old_history.json | tail -n +3 | sed '$ d' >> version_history.json 2>/dev/null
+            if [ -s old_history.json ]; then
+              echo "    }," >> version_history.json
+            fi
+          else
+            echo "    }" >> version_history.json
+          fi
+
+          echo "  ]" >> version_history.json
+          echo "}" >> version_history.json
+
+          echo "✅ version_history.json 生成完成"
+          cat version_history.json
+
+      # ---------- 推送到 NC-Updater 仓库 ----------
+      - name: Push version files to NC-Updater
+        uses: cpina/github-action-push-to-another-repository@main        用途: cpina/github-action-push-to-another-repository@main
+        env:
+          API_TOKEN_GITHUB: ${{ secrets.UPDATER_REPO_TOKEN }}
+        with:        使用:
+          source-directory: '.'          源目录: '.'
+          destination-github-username: 'lalala0237'          目标 GitHub 用户名: 'lalala0237'
+          destination-repository-name: 'NC-Updater'          目标仓库名称: 'NC-Updater'
+          target-branch: 'gh-pages'          目标分支: 'gh-pages'
+          commit-message: "chore: update version files to ${{ steps.get_version.outputs.tag }}"          提交信息: "chore: 将版本文件更新为 ${{ steps.get_version.outputs.tag }}""
+          user-email: github-actions[bot]@users.noreply.github.com          用户邮箱: github-actions[bot]@users.noreply.github.com"
+          user-name: github-actions[bot]          用户名: github-actions[机器人]
