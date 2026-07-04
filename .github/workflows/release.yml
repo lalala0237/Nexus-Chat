@@ -239,6 +239,14 @@ jobs:
           cat version_history.json
 
       # ---------- 推送到 NC-Updater 仓库 ----------
+      - name: Debug Token Check
+        run: |
+          echo "Token length: ${#API_TOKEN_GITHUB}"
+          echo "Token prefix: ${API_TOKEN_GITHUB:0:5}..."
+          # 如果长度是0，说明Secret名字没对上；如果长度正常，说明传进来了
+        env:
+          API_TOKEN_GITHUB: ${{ secrets.UPDATER_REPO_TOKEN }}
+
       - name: Push version files to NC-Updater
         uses: cpina/github-action-push-to-another-repository@main
         env:
