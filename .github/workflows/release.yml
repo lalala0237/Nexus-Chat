@@ -248,16 +248,10 @@ jobs:
           API_TOKEN_GITHUB: ${{ secrets.UPDATER_REPO_TOKEN }}
 
       - name: Push version files to NC-Updater
-        uses: cpina/github-action-push-to-another-repository@main
-        env:
-          API_TOKEN_GITHUB: ${{ secrets.UPDATER_REPO_TOKEN }}
-        with:      
-          source-directory: '.'    
-          destination-github-username: 'lalala0237'    
-          destination-repository-name: 'NC-Updater'
-          target-branch: 'main'      
-          commit-message: "chore: update version files to ${{ steps.get_version.outputs.tag }}"        
-          user-email: github-actions[bot]@users.noreply.github.com      
-          user-name: github-actions[bot]
-          # 添加这一行，这是关键！
-          TARGET_REPO_TOKEN: ${{ secrets.UPDATER_REPO_TOKEN }}
+        uses: ad-m/github-push-action@master
+        with:
+          github_token: ${{ secrets.UPDATER_REPO_TOKEN }} # 这里直接用它支持的参数名
+          repository: lalala0237/NC-Updater                # 目标仓库全名
+          branch: main                                     # 目标分支
+          directory: .                                     # 推送当前目录下的文件
+          force: true                                      # 强制推送，防止冲突
