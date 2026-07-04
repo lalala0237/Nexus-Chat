@@ -242,7 +242,7 @@ jobs:
       - name: Push version files to NC-Updater
         uses: cpina/github-action-push-to-another-repository@main
         env:
-          API_TOKEN_GITHUB: ${{ secrets.UPDATER_REPO_TOKEN }}
+          GITHUB_TOKEN: ${{ secrets.UPDATER_REPO_TOKEN }}
         with:      
           source-directory: '.'    
           destination-github-username: 'lalala0237'    
