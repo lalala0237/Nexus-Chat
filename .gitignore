@@ -63,3 +63,20 @@ logs/
 
 # Briefcase local configuratoin
 .briefcase/
+
+# BeeWare 构建目录
+build/
+dist/
+
+# Python 缓存
+__pycache__/
+*.pyc
+*.pyo
+
+# 虚拟环境
+.venv/
+venv/
+
+# 系统文件
+.DS_Store
+Thumbs.db
