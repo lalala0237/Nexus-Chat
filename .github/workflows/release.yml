@@ -260,4 +260,4 @@ jobs:
           user-email: github-actions[bot]@users.noreply.github.com      
           user-name: github-actions[bot]
           # 添加这一行，这是关键！
-          target-repository-token: ${{ secrets.UPDATER_REPO_TOKEN }}
+          TARGET_REPO_TOKEN: ${{ secrets.UPDATER_REPO_TOKEN }}
