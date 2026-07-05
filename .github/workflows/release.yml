@@ -105,20 +105,17 @@ jobs:
           path: dist/
 
       - name: Generate Checksums
-        id: checksum
         run: |
           cd dist
-          sha256sum * > CHECKSUMS.txt
-
-          # 提取 Hash 值
-          # 注意：文件名已按要求修改为 Nexus-Chat-*
-          WINDOWS_HASH=$(grep -oE '^[0-9a-f]{64}(?=.*Nexus-Chat-[0-9].*\.msi)' CHECKSUMS.txt | awk '{print $1}')
-          MACOS_HASH=$(grep -oE '^[0-9a-f]{64}(?=.*Nexus-Chat-[0-9].*\.dmg)' CHECKSUMS.txt | awk '{print $1}')
-          ANDROID_HASH=$(grep -oE '^[0-9a-f]{64}(?=.*Nexus-Chat-Android\.apk)' CHECKSUMS.txt | awk '{print $1}')
-
-          echo "windows_hash=$WINDOWS_HASH" >> $GITHUB_OUTPUT
-          echo "macos_hash=$MACOS_HASH" >> $GITHUB_OUTPUT
-          echo "android_hash=$ANDROID_HASH" >> $GITHUB_OUTPUT
+          # 创建一个空的校验和文件
+          > checksums.txt
+          
+          # 自动查找并计算所有安装包的哈希值
+          # 这里列出了常见的安装包后缀，你可以根据实际生成的文件调整
+          find . -type f \( -name "*.apk" -o -name "*.aab" -o -name "*.dmg" -o -name "*.msi" -o -name "*.exe" \) -exec sha256sum {} \; >> checksums.txt
+          
+          # 打印出来看看
+          cat checksums.txt
 
       - name: Create Release
         id: create_release
