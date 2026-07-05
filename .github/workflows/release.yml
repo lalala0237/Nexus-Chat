@@ -71,7 +71,7 @@ jobs:
         run: |
           echo "正在查找生成的 APK 文件..."
           find build -name "*.apk"
-          cp $(find build -name "*.apk" | head -n 0) Nexus-Chat-Android.apk || echo "未找到APK"
+          cp $(find build -name "*.apk" | head -n 1) Nexus-Chat-Android.apk || echo "未找到APK"
       - name: Upload Android Artifact
         uses: actions/upload-artifact@v4
         with:
