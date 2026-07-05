@@ -247,11 +247,33 @@ jobs:
         env:
           API_TOKEN_GITHUB: ${{ secrets.UPDATER_REPO_TOKEN }}
 
-      - name: Push version files to NC-Updater
-        uses: ad-m/github-push-action@master
-        with:
-          github_token: ${{ secrets.UPDATER_REPO_TOKEN }} # 这里直接用它支持的参数名
-          repository: lalala0237/NC-Updater                # 目标仓库全名
-          branch: main                                     # 目标分支
-          directory: .                                     # 推送当前目录下的文件
-          force: true                                      # 强制推送，防止冲突
+#      - name: Push version files to NC-Updater
+#        uses: ad-m/github-push-action@master
+#        with:
+#          github_token: ${{ secrets.UPDATER_REPO_TOKEN }} # 这里直接用它支持的参数名
+#          repository: lalala0237/NC-Updater                # 目标仓库全名
+#          branch: main                                     # 目标分支
+#          directory: .                                     # 推送当前目录下的文件
+#          force: true                                      # 强制推送，防止冲突
+
+      - name: Push to NC-Updater
+        env:
+          # 定义环境变量，方便调用
+          MY_TOKEN: ${{ secrets.UPDATER_REPO_TOKEN }}
+        run: |
+          # 1. 克隆目标仓库 (使用 Token 进行身份验证)
+          git clone https://x-access-token:${MY_TOKEN}@github.com/lalala0237/NC-Updater.git target_repo
+          
+          # 2. 把你要推送的文件复制进去 (假设你要推的是当前目录下的 version.json)
+          # 注意：这里要根据你实际的文件路径修改，比如 cp version.json target_repo/
+          cp -r ./* target_repo/ 
+          
+          # 3. 进入目录并提交
+          cd target_repo
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git add .
+          git commit -m "Auto update version files" || echo "No changes to commit"
+          
+          # 4. 推送
+          git push origin main
