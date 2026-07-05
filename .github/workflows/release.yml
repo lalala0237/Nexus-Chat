@@ -1,7 +1,7 @@
 name: Build and Release Nexus-Chat
 
 on:
-  workflow_dispatch: # 允许手动点击运行
+  workflow_dispatch:
   push:
     tags:
       - 'v*.*.*'
@@ -39,12 +39,9 @@ jobs:
           python-version: '3.13'
       - name: Install Briefcase
         run: pip install briefcase
-
-      # 【关键修复】告诉 Briefcase 不要尝试签名，否则 CI 会报错 214
       - name: Disable macOS Signing
         run: |
           echo "BRIEFCASE_NO_SIGN=1" >> $GITHUB_ENV
-
       - name: Build macOS App
         run: briefcase create && briefcase build && briefcase package --adhoc-sign
       - name: Upload Artifact
@@ -59,69 +56,126 @@ jobs:
     steps:
       - name: Checkout Code
         uses: actions/checkout@v4
-
       - name: Set up Python
         uses: actions/setup-python@v5
         with:
-          python-version: '3.12' # 推荐用稳定的 3.12
-
+          python-version: '3.12'
       - name: Install Briefcase
         run: pip install briefcase
-
       - name: Build Android App
         run: |
-          # 创建并打包 Android Debug 版本
           briefcase create android
           briefcase build android
           briefcase package android --p apk
-
-      # 👇👇👇 关键修改：调试与上传 👇👇👇
       - name: Find APK file
         run: |
           echo "正在查找生成的 APK 文件..."
-          # 使用 find 命令在整个构建目录下寻找 .apk 文件
           find build -name "*.apk"
-          # 将找到的第一个 apk 复制到根目录，方便上传
-          cp $(find build -name "*.apk" | head -n 1) Nexus-Chat-Android.apk || echo "未找到APK"
-
+          cp $(find build -name "*.apk" | head -n 0) Nexus-Chat-Android.apk || echo "未找到APK"
       - name: Upload Android Artifact
         uses: actions/upload-artifact@v4
         with:
           name: Nexus-Chat-Android
-          # 直接上传刚才复制出来的文件，或者用更宽泛的路径
           path: Nexus-Chat-Android.apk
-          if-no-files-found: error # 如果没找到文件就报错，不要静默失败
+          if-no-files-found: error
 
-  # ================= 生成版本文件并推送到 NC-Updater =================
-  generate-version-files:
+  # ================= 创建 Release 并计算 Hash =================
+  # 依赖所有构建 Job，负责计算 SHA256 并创建 Release
+  create-release:
     needs: [build-windows, build-macos, build-android]
     runs-on: ubuntu-latest
+    outputs:
+      version: ${{ steps.get_version.outputs.version }}
+      windows_hash: ${{ steps.checksum.outputs.windows_hash }}
+      macos_hash: ${{ steps.checksum.outputs.macos_hash }}
+      android_hash: ${{ steps.checksum.outputs.android_hash }}
     steps:
-      - name: Checkout Code
-        uses: actions/checkout@v4
-
-      # ---------- 解析版本号 ----------
       - name: Get version info
         id: get_version
         run: |
           TAG="${{ github.ref }}"
           TAG=${TAG##*/}
           VERSION=${TAG#v}
-          if [[ $VERSION == *-* ]]; then
-            echo "is_prerelease=true" >> $GITHUB_OUTPUT
-          else
-            echo "is_prerelease=false" >> $GITHUB_OUTPUT
-          fi
           echo "version=$VERSION" >> $GITHUB_OUTPUT
           echo "tag=$TAG" >> $GITHUB_OUTPUT
+
+      - name: Download Artifacts
+        uses: actions/download-artifact@v4
+        with:
+          path: dist/
+
+      - name: Generate Checksums
+        id: checksum
+        run: |
+          cd dist
+          sha256sum * > CHECKSUMS.txt
+
+          # 提取 Hash 值
+          # 注意：文件名已按要求修改为 Nexus-Chat-*
+          WINDOWS_HASH=$(grep -oE '^[0-9a-f]{64}(?=.*Nexus-Chat-[0-9].*\.msi)' CHECKSUMS.txt | awk '{print $1}')
+          MACOS_HASH=$(grep -oE '^[0-9a-f]{64}(?=.*Nexus-Chat-[0-9].*\.dmg)' CHECKSUMS.txt | awk '{print $1}')
+          ANDROID_HASH=$(grep -oE '^[0-9a-f]{64}(?=.*Nexus-Chat-Android\.apk)' CHECKSUMS.txt | awk '{print $1}')
+
+          echo "windows_hash=$WINDOWS_HASH" >> $GITHUB_OUTPUT
+          echo "macos_hash=$MACOS_HASH" >> $GITHUB_OUTPUT
+          echo "android_hash=$ANDROID_HASH" >> $GITHUB_OUTPUT
+
+      - name: Create Release
+        id: create_release
+        uses: actions/create-release@v1
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        with:
+          tag_name: ${{ steps.get_version.outputs.tag }}
+          release_name: Nexus-Chat ${{ steps.get_version.outputs.version }}
+          body: |
+            🚀 自动发布 v${{ steps.get_version.outputs.version }}
+
+            **文件校验值 (SHA256):**
+            - Windows: \`${{ steps.checksum.outputs.windows_hash }}\`
+            - macOS: \`${{ steps.checksum.outputs.macos_hash }}\`
+            - Android: \`${{ steps.checksum.outputs.android_hash }}\`
+          draft: false
+          # 上传 Release Assets
+          assets_path: dist/
+
+  # ================= 生成版本文件并推送到 NC-Updater =================
+  # 依赖 create-release，以便获取 SHA256 值
+  generate-version-files:
+    needs: [create-release]
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout Code
+        uses: actions/checkout@v4
+
+      # 获取版本信息和 Hash 值
+      - name: Get version and hash info
+        id: get_info
+        run: |
+          TAG="${{ github.ref }}"
+          TAG=${TAG##*/}
+          VERSION=${TAG#v}
+          # 从依赖的 Job 中获取输出
+          WINDOWS_HASH="${{ needs.create-release.outputs.windows_hash }}"
+          MACOS_HASH="${{ needs.create-release.outputs.macos_hash }}"
+          ANDROID_HASH="${{ needs.create-release.outputs.android_hash }}"
+
+          echo "version=$VERSION" >> $GITHUB_OUTPUT
+          echo "tag=$TAG" >> $GITHUB_OUTPUT
+          echo "windows_hash=$WINDOWS_HASH" >> $GITHUB_OUTPUT
+          echo "macos_hash=$MACOS_HASH" >> $GITHUB_OUTPUT
+          echo "android_hash=$ANDROID_HASH" >> $GITHUB_OUTPUT
 
       # ---------- 生成 version.json ----------
       - name: Generate version.json
         run: |
-          VERSION="${{ steps.get_version.outputs.version }}"
-          TAG="${{ steps.get_version.outputs.tag }}"
+          VERSION="${{ steps.get_info.outputs.version }}"
+          TAG="${{ steps.get_info.outputs.tag }}"
           REPO="${{ github.repository }}"
           NOW=$(TZ=Asia/Shanghai date '+%Y-%m-%d %H:%M:%S CST')
+          WINDOWS_HASH="${{ steps.get_info.outputs.windows_hash }}"
+          MACOS_HASH="${{ steps.get_info.outputs.macos_hash }}"
+          ANDROID_HASH="${{ steps.get_info.outputs.android_hash }}"
 
           cat > version.json << EOF
           {
@@ -129,9 +183,14 @@ jobs:
             "release_date": "$NOW",
             "release_notes": "Release $VERSION",
             "downloads": {
-              "windows": "https://github.com/$REPO/releases/download/$TAG/NexusChat-$VERSION.msi",
-              "macos": "https://github.com/$REPO/releases/download/$TAG/NexusChat-$VERSION.dmg",
+              "windows": "https://github.com/$REPO/releases/download/$TAG/Nexus-Chat-$VERSION.msi",
+              "macos": "https://github.com/$REPO/releases/download/$TAG/Nexus-Chat-$VERSION.dmg",
               "android": "https://github.com/$REPO/releases/download/$TAG/Nexus-Chat-Android.apk"
+            },
+            "checksums": {
+              "windows": "$WINDOWS_HASH",
+              "macos": "$MACOS_HASH",
+              "android": "$ANDROID_HASH"
             }
           }
           EOF
@@ -145,11 +204,14 @@ jobs:
       # ---------- 生成带注释的 version_history.json ----------
       - name: Generate version_history.json
         run: |
-          VERSION="${{ steps.get_version.outputs.version }}"
-          TAG="${{ steps.get_version.outputs.tag }}"
+          VERSION="${{ steps.get_info.outputs.version }}"
+          TAG="${{ steps.get_info.outputs.tag }}"
           REPO="${{ github.repository }}"
           NOW=$(TZ=Asia/Shanghai date '+%Y-%m-%d %H:%M:%S CST')
-          IS_PRE="${{ steps.get_version.outputs.is_prerelease }}"
+          IS_PRE="false"
+          if [[ "$VERSION" == *-* ]]; then
+            IS_PRE="true"
+          fi
 
           if [ "$IS_PRE" = "true" ]; then
             VER_TYPE="预发布版本 (Prerelease)"
@@ -187,6 +249,7 @@ jobs:
           //    - tag_name       : 对应的 Git Tag 名称
           //    - release_page   : GitHub Release 页面链接
           //    - downloads      : 各平台下载链接
+          //    - checksums      : 各平台文件的 SHA256 校验值
           //
           // ====================================================================
 
@@ -214,16 +277,20 @@ jobs:
                 "tag_name": "$TAG",
                 "release_page": "https://github.com/$REPO/releases/tag/$TAG",
                 "downloads": {
-                  "windows": "https://github.com/$REPO/releases/download/$TAG/NexusChat-$VERSION.msi",
-                  "macos": "https://github.com/$REPO/releases/download/$TAG/NexusChat-$VERSION.dmg",
+                  "windows": "https://github.com/$REPO/releases/download/$TAG/Nexus-Chat-$VERSION.msi",
+                  "macos": "https://github.com/$REPO/releases/download/$TAG/Nexus-Chat-$VERSION.dmg",
                   "android": "https://github.com/$REPO/releases/download/$TAG/Nexus-Chat-Android.apk"
+                },
+                "checksums": {
+                  "windows": "${{ steps.get_info.outputs.windows_hash }}",
+                  "macos": "${{ steps.get_info.outputs.macos_hash }}",
+                  "android": "${{ steps.get_info.outputs.android_hash }}"
                 }
               }
           EOF
 
           # --- 合并旧的历史版本条目 ---
           if [ -s old_history.json ]; then
-            # 去除注释行，提取旧 history 数组内容，拼接到新文件
             grep -v '^\s*//' old_history.json | tail -n +3 | sed '$ d' >> version_history.json 2>/dev/null
             if [ -s old_history.json ]; then
               echo "    }," >> version_history.json
@@ -235,48 +302,21 @@ jobs:
           echo "  ]" >> version_history.json
           echo "}" >> version_history.json
 
-          echo "✅ version_history.json 生成完成"
-          cat version_history.json
-
       # ---------- 推送到 NC-Updater 仓库 ----------
-      - name: Debug Token Check
-        run: |
-          echo "Token length: ${#API_TOKEN_GITHUB}"
-          echo "Token prefix: ${API_TOKEN_GITHUB:0:5}..."
-          # 如果长度是0，说明Secret名字没对上；如果长度正常，说明传进来了
-        env:
-          API_TOKEN_GITHUB: ${{ secrets.UPDATER_REPO_TOKEN }}
-
-#      - name: Push version files to NC-Updater
-#        uses: ad-m/github-push-action@master
-#        with:
-#          github_token: ${{ secrets.UPDATER_REPO_TOKEN }} # 这里直接用它支持的参数名
-#          repository: lalala0237/NC-Updater                # 目标仓库全名
-#          branch: main                                     # 目标分支
-#          directory: .                                     # 推送当前目录下的文件
-#          force: true                                      # 强制推送，防止冲突
-
       - name: Push to NC-Updater
         env:
           MY_TOKEN: ${{ secrets.UPDATER_REPO_TOKEN }}
         run: |
-          # 1. 配置全局 Git 用户信息
           git config --global user.name "github-actions[bot]"
           git config --global user.email "github-actions[bot]@users.noreply.github.com"
 
-          # 2. 克隆目标仓库到临时文件夹 'target_repo'
-          # 使用 x-access-token 方式认证，这是 GitHub Actions 跨仓库推送的标准姿势
           git clone https://x-access-token:${MY_TOKEN}@github.com/lalala0237/NC-Updater.git target_repo
 
-          # 3. 将生成的两个 JSON 文件精准复制到目标仓库的根目录
-          # 使用 $GITHUB_WORKSPACE 环境变量确保路径绝对正确，杜绝“瞎写”路径的问题
           cp "$GITHUB_WORKSPACE/version.json" target_repo/
           cp "$GITHUB_WORKSPACE/version_history.json" target_repo/
 
-          # 4. 进入目标仓库目录进行提交和推送
           cd target_repo
           
-          # 检查是否有变动，如果没有变动则跳过提交，防止报错
           if [ -z "$(git status --porcelain)" ]; then
             echo "✅ No changes detected, skipping push."
             exit 0
@@ -284,7 +324,5 @@ jobs:
 
           git add .
           git commit -m "chore: auto update version files from Nexus-Chat"
-          
-          # 推送到 main 分支
           git push origin main
           echo "✅ Successfully pushed to lalala0237/NC-Updater"
