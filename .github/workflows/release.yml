@@ -79,16 +79,11 @@ jobs:
           path: Nexus-Chat-Android.apk
           if-no-files-found: error
 
-  # ================= 创建 Release 并计算 Hash =================
-  # 依赖所有构建 Job，负责计算 SHA256 并创建 Release
+  # ================= 创建 Release =================
+  # 依赖所有构建 Job，负责下载文件、计算 SHA256 并创建 Release
   create-release:
     needs: [build-windows, build-macos, build-android]
     runs-on: ubuntu-latest
-    outputs:
-      version: ${{ steps.get_version.outputs.version }}
-      windows_hash: ${{ steps.checksum.outputs.windows_hash }}
-      macos_hash: ${{ steps.checksum.outputs.macos_hash }}
-      android_hash: ${{ steps.checksum.outputs.android_hash }}
     steps:
       - name: Get version info
         id: get_version
@@ -105,36 +100,37 @@ jobs:
           path: dist/
 
       - name: Generate Checksums
+        id: generate_checksums
         run: |
           cd dist
-          # 创建一个空的校验和文件
+          # 创建校验和文件
           > checksums.txt
           
-          # 自动查找并计算所有安装包的哈希值
-          # 这里列出了常见的安装包后缀，你可以根据实际生成的文件调整
+          # 查找并计算所有安装包的哈希值
           find . -type f \( -name "*.apk" -o -name "*.aab" -o -name "*.dmg" -o -name "*.msi" -o -name "*.exe" \) -exec sha256sum {} \; >> checksums.txt
           
-          # 打印出来看看
+          # 将校验和文件内容设置为步骤输出，供后续 Job 使用
+          echo "checksum_body<<EOF" >> $GITHUB_OUTPUT
           cat checksums.txt
+          echo "EOF" >> $GITHUB_OUTPUT
 
       - name: Create Release
-        id: create_release
-        uses: actions/create-release@v1
+        # 使用更现代、更可靠的 action-gh-release
+        uses: softprops/action-gh-release@v2 
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         with:
-          tag_name: ${{ steps.get_version.outputs.tag }}
-          release_name: Nexus-Chat ${{ steps.get_version.outputs.version }}
+          tag: ${{ steps.get_version.outputs.tag }}
+          name: Nexus-Chat ${{ steps.get_version.outputs.version }}
           body: |
             🚀 自动发布 v${{ steps.get_version.outputs.version }}
 
             **文件校验值 (SHA256):**
-            - Windows: \`${{ steps.checksum.outputs.windows_hash }}\`
-            - macOS: \`${{ steps.checksum.outputs.macos_hash }}\`
-            - Android: \`${{ steps.checksum.outputs.android_hash }}\`
-          draft: false
-          # 上传 Release Assets
-          assets_path: dist/
+            \`\`\`
+            ${{ steps.generate_checksums.outputs.checksum_body }}
+            \`\`\`
+          # 自动上传 dist/ 目录下的所有文件
+          files: dist/**
 
   # ================= 生成版本文件并推送到 NC-Updater =================
   # 依赖 create-release，以便获取 SHA256 值
@@ -145,20 +141,36 @@ jobs:
       - name: Checkout Code
         uses: actions/checkout@v4
 
-      # 获取版本信息和 Hash 值
-      - name: Get version and hash info
+      # 获取版本信息
+      - name: Get version info
         id: get_info
         run: |
           TAG="${{ github.ref }}"
           TAG=${TAG##*/}
           VERSION=${TAG#v}
-          # 从依赖的 Job 中获取输出
-          WINDOWS_HASH="${{ needs.create-release.outputs.windows_hash }}"
-          MACOS_HASH="${{ needs.create-release.outputs.macos_hash }}"
-          ANDROID_HASH="${{ needs.create-release.outputs.android_hash }}"
-
+          REPO="${{ github.repository }}"
           echo "version=$VERSION" >> $GITHUB_OUTPUT
           echo "tag=$TAG" >> $GITHUB_OUTPUT
+          echo "repo=$REPO" >> $GITHUB_OUTPUT
+
+      # 下载 create-release Job 中生成的校验和文件
+      - name: Download Checksums
+        uses: actions/download-artifact@v4
+        with:
+          path: .
+          # 指定只下载 checksums.txt，避免下载大量二进制文件
+          pattern: checksums.txt 
+
+      # 提取哈希值
+      - name: Extract Hash Values
+        id: extract_hashes
+        run: |
+          # 从 checksums.txt 中提取哈希值
+          # 假设文件名中包含平台标识
+          WINDOWS_HASH=$(grep -oE '([a-f0-9]{64}) .*\.msi' checksums.txt | awk '{print $1}')
+          MACOS_HASH=$(grep -oE '([a-f0-9]{64}) .*\.dmg' checksums.txt | awk '{print $1}')
+          ANDROID_HASH=$(grep -oE '([a-f0-9]{64}) .*\.apk' checksums.txt | awk '{print $1}')
+
           echo "windows_hash=$WINDOWS_HASH" >> $GITHUB_OUTPUT
           echo "macos_hash=$MACOS_HASH" >> $GITHUB_OUTPUT
           echo "android_hash=$ANDROID_HASH" >> $GITHUB_OUTPUT
@@ -168,11 +180,11 @@ jobs:
         run: |
           VERSION="${{ steps.get_info.outputs.version }}"
           TAG="${{ steps.get_info.outputs.tag }}"
-          REPO="${{ github.repository }}"
+          REPO="${{ steps.get_info.outputs.repo }}"
           NOW=$(TZ=Asia/Shanghai date '+%Y-%m-%d %H:%M:%S CST')
-          WINDOWS_HASH="${{ steps.get_info.outputs.windows_hash }}"
-          MACOS_HASH="${{ steps.get_info.outputs.macos_hash }}"
-          ANDROID_HASH="${{ steps.get_info.outputs.android_hash }}"
+          WINDOWS_HASH="${{ steps.extract_hashes.outputs.windows_hash }}"
+          MACOS_HASH="${{ steps.extract_hashes.outputs.macos_hash }}"
+          ANDROID_HASH="${{ steps.extract_hashes.outputs.android_hash }}"
 
           cat > version.json << EOF
           {
@@ -203,7 +215,7 @@ jobs:
         run: |
           VERSION="${{ steps.get_info.outputs.version }}"
           TAG="${{ steps.get_info.outputs.tag }}"
-          REPO="${{ github.repository }}"
+          REPO="${{ steps.get_info.outputs.repo }}"
           NOW=$(TZ=Asia/Shanghai date '+%Y-%m-%d %H:%M:%S CST')
           IS_PRE="false"
           if [[ "$VERSION" == *-* ]]; then
@@ -279,9 +291,9 @@ jobs:
                   "android": "https://github.com/$REPO/releases/download/$TAG/Nexus-Chat-Android.apk"
                 },
                 "checksums": {
-                  "windows": "${{ steps.get_info.outputs.windows_hash }}",
-                  "macos": "${{ steps.get_info.outputs.macos_hash }}",
-                  "android": "${{ steps.get_info.outputs.android_hash }}"
+                  "windows": "${{ steps.extract_hashes.outputs.windows_hash }}",
+                  "macos": "${{ steps.extract_hashes.outputs.macos_hash }}",
+                  "android": "${{ steps.extract_hashes.outputs.android_hash }}"
                 }
               }
           EOF
