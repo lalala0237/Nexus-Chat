@@ -115,7 +115,7 @@ jobs:
           # 使用 --no-input 避免交互，--update 确保资源同步
           briefcase create android --no-input
           briefcase build android --no-input
-          briefcase package android --no-input --format apk
+          briefcase package android --no-input
 
       # --- 核心修复：智能查找并重命名 APK ---
       - name: Rename & Upload Artifact (Android)
