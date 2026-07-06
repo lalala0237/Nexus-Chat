@@ -104,33 +104,48 @@ jobs:
         uses: actions/setup-python@v5
         with:
           python-version: '3.13'
-          
-      - name: Install Briefcase & Dependencies
+              
+      - name: Install Dependencies
         run: |
           pip install briefcase
-          # 安装 Android 构建必须的依赖，防止因为缺包导致 briefcase 试图交互式安装
           sudo apt-get update
-          sudo apt-get install -y libc6-dev libffi-dev
-      - name: Create Project (Non-Interactive)
-        run: briefcase create android --no-input
-        
-      - name: Build APK
-        run: briefcase build android --no-input
-        
-      - name: Package APK
-        run: briefcase package android --no-input --adhoc-sign
-      - name: Rename & Upload Artifact
+          sudo apt-get install -y libc6-dev libffi-dev libssl-dev zlib1g-dev
+      - name: Build Android APK
+        run: |
+          # 使用 --no-input 避免交互，--update 确保资源同步
+          briefcase create android --no-input
+          briefcase build android --no-input
+          briefcase package android --no-input --format apk
+
+      # --- 核心修复：智能查找并重命名 APK ---
+      - name: Rename & Upload Artifact (Android)
         run: |
           VER=${GITHUB_REF_NAME#v}
-          # 找到生成的 apk 并重命名
-          mv build/nexus_chat/android/gradle/app/build/outputs/apk/release/*.apk "Nexus-Chat-Android-v${VER}.apk"
-        # 注意：上面的路径是 Briefcase 默认路径，如果变了请根据实际调整
-        
-      - uses: actions/upload-artifact@v4
+              
+          # 1. 使用 find 命令在整个项目中搜索 .apk 文件
+          # 排除掉 debug 版本，只找 release 文件夹下的
+          APK_PATH=$(find . -path "*/release/*.apk" -not -name "*unsigned*" | head -n 1)
+          
+          if [ -z "$APK_PATH" ]; then
+            echo "Error: No APK file found!"
+            exit 1
+          fi
+              
+          echo "Found APK at: $APK_PATH"
+              
+          # 2. 定义新文件名
+          NEW_NAME="Nexus-Chat-Android-v${VER}.apk"
+              
+          # 3. 复制并重命名到当前目录（方便后续上传）
+          cp "$APK_PATH" "./$NEW_NAME"
+              
+        shell: bash
+  
+      - name: Upload Android Artifact
+        uses: actions/upload-artifact@v4
         with:
           name: android-apk
           path: Nexus-Chat-Android-*.apk
-  
   # ================= 创建 Release =================
   create-release:
     needs: [build-windows, build-macos, build-android]
