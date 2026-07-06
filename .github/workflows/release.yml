@@ -52,58 +52,85 @@ jobs:
       - name: Install Briefcase
         run: pip install briefcase
       - name: Build macOS DMG
-        run: briefcase create && briefcase build && briefcase package
+        run: briefcase create --no-input && briefcase build --no-input && briefcase package --no-input --adhoc-sign
       - name: Rename & Upload Artifact
         run: |
-          VER=${GITHUB_REF_NAME#v}
-          NEW_NAME="Nexus-Chat-MacOS-v${VER}.dmg"
-          
-          # 查找生成的 dmg 文件并重命名
-          FILE=$(find dist -name "*.dmg" | head -n 1)
-          if [ -f "$FILE" ]; then
-              mv "$FILE" "dist/$NEW_NAME"
-              echo "Renamed to: $NEW_NAME"
-          else
-              echo "DMG file not found!"
-              exit 1
-          fi
+              VER=${GITHUB_REF_NAME#v}
+              mv dist/*.dmg "Nexus-Chat-MacOS-v${VER}.dmg"
+            
       - uses: actions/upload-artifact@v4
         with:
           name: macos-dmg
-          path: dist/*.dmg
+          path: Nexus-Chat-MacOS-*.dmg
 
   # ================= Android 构建 =================
+  #build-android:
+  #  runs-on: ubuntu-latest
+  #  steps:
+  #    - uses: actions/checkout@v4
+  #    - name: Set up Python
+  #      uses: actions/setup-python@v5
+  #      with:
+  #        python-version: '3.13'
+  #    - name: Install Briefcase
+  #      run: pip install briefcase
+  #    - name: Build Android APK
+  #      run: briefcase create && briefcase build && briefcase package
+  #    - name: Rename & Upload Artifact
+  #      run: |
+  #        VER=${GITHUB_REF_NAME#v}
+  #        NEW_NAME="Nexus-Chat-Android-v${VER}.apk"
+  #        
+  #        # 查找生成的 apk 文件并重命名
+  #        FILE=$(find build -name "*.apk" | head -n 1)
+  #        if [ -f "$FILE" ]; then
+  #            cp "$FILE" "$NEW_NAME"
+  #            echo "Renamed to: $NEW_NAME"
+  #        else
+  #            echo "APK file not found!"
+  #            exit 1
+  #        fi
+  #    - uses: actions/upload-artifact@v4
+  #      with:
+  #        name: android-apk
+  #        path: Nexus-Chat-Android-v*.apk
+
   build-android:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
+      
       - name: Set up Python
         uses: actions/setup-python@v5
         with:
           python-version: '3.13'
-      - name: Install Briefcase
-        run: pip install briefcase
-      - name: Build Android APK
-        run: briefcase create && briefcase build && briefcase package
+          
+      - name: Install Briefcase & Dependencies
+        run: |
+          pip install briefcase
+          # 安装 Android 构建必须的依赖，防止因为缺包导致 briefcase 试图交互式安装
+          sudo apt-get update
+          sudo apt-get install -y libc6-dev libffi-dev
+      - name: Create Project (Non-Interactive)
+        run: briefcase create android --no-input
+        
+      - name: Build APK
+        run: briefcase build android --no-input
+        
+      - name: Package APK
+        run: briefcase package android --no-input --adhoc-sign
       - name: Rename & Upload Artifact
         run: |
           VER=${GITHUB_REF_NAME#v}
-          NEW_NAME="Nexus-Chat-Android-v${VER}.apk"
-          
-          # 查找生成的 apk 文件并重命名
-          FILE=$(find build -name "*.apk" | head -n 1)
-          if [ -f "$FILE" ]; then
-              cp "$FILE" "$NEW_NAME"
-              echo "Renamed to: $NEW_NAME"
-          else
-              echo "APK file not found!"
-              exit 1
-          fi
+          # 找到生成的 apk 并重命名
+          mv build/nexus_chat/android/gradle/app/build/outputs/apk/release/*.apk "Nexus-Chat-Android-v${VER}.apk"
+        # 注意：上面的路径是 Briefcase 默认路径，如果变了请根据实际调整
+        
       - uses: actions/upload-artifact@v4
         with:
           name: android-apk
-          path: Nexus-Chat-Android-v*.apk
-
+          path: Nexus-Chat-Android-*.apk
+  
   # ================= 创建 Release =================
   create-release:
     needs: [build-windows, build-macos, build-android]
