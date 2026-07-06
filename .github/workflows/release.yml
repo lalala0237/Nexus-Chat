@@ -11,8 +11,7 @@ jobs:
   build-windows:
     runs-on: windows-latest
     steps:
-      - name: Checkout Code
-        uses: actions/checkout@v4
+      - uses: actions/checkout@v4
       - name: Set up Python
         uses: actions/setup-python@v5
         with:
@@ -21,117 +20,142 @@ jobs:
         run: pip install briefcase
       - name: Build Windows Installer
         run: briefcase create && briefcase build && briefcase package
-      - name: Upload Artifact
-        uses: actions/upload-artifact@v4
+      - name: Rename & Upload Artifact
+        shell: pwsh
+        run: |
+          $VER = "${{ github.ref_name }}" -replace '^v', ''
+          $NEW_NAME = "Nexus-Chat-Windows-v${VER}.msi"
+          
+          # 查找生成的 msi 文件并重命名
+          $FILE = Get-ChildItem -Path dist -Filter *.msi | Select-Object -First 1
+          if ($FILE) {
+              Rename-Item -Path $FILE.FullName -NewName $NEW_NAME
+              Write-Host "Renamed to: $NEW_NAME"
+          } else {
+              Write-Error "MSI file not found!"
+              exit 1
+          }
+      - uses: actions/upload-artifact@v4
         with:
-          name: nexus-chat-windows
+          name: windows-installer
           path: dist/*.msi
 
-  # ================= macOS 构建 (已修复签名问题) =================
+  # ================= macOS 构建 =================
   build-macos:
     runs-on: macos-latest
     steps:
-      - name: Checkout Code
-        uses: actions/checkout@v4
+      - uses: actions/checkout@v4
       - name: Set up Python
         uses: actions/setup-python@v5
         with:
           python-version: '3.13'
       - name: Install Briefcase
         run: pip install briefcase
-      - name: Disable macOS Signing
+      - name: Build macOS DMG
+        run: briefcase create && briefcase build && briefcase package
+      - name: Rename & Upload Artifact
         run: |
-          echo "BRIEFCASE_NO_SIGN=1" >> $GITHUB_ENV
-      - name: Build macOS App
-        run: briefcase create && briefcase build && briefcase package --adhoc-sign
-      - name: Upload Artifact
-        uses: actions/upload-artifact@v4
+          VER=${GITHUB_REF_NAME#v}
+          NEW_NAME="Nexus-Chat-MacOS-v${VER}.dmg"
+          
+          # 查找生成的 dmg 文件并重命名
+          FILE=$(find dist -name "*.dmg" | head -n 1)
+          if [ -f "$FILE" ]; then
+              mv "$FILE" "dist/$NEW_NAME"
+              echo "Renamed to: $NEW_NAME"
+          else
+              echo "DMG file not found!"
+              exit 1
+          fi
+      - uses: actions/upload-artifact@v4
         with:
-          name: nexus-chat-macos
+          name: macos-dmg
           path: dist/*.dmg
 
   # ================= Android 构建 =================
   build-android:
     runs-on: ubuntu-latest
     steps:
-      - name: Checkout Code
-        uses: actions/checkout@v4
+      - uses: actions/checkout@v4
       - name: Set up Python
         uses: actions/setup-python@v5
         with:
-          python-version: '3.12'
+          python-version: '3.13'
       - name: Install Briefcase
         run: pip install briefcase
-      - name: Build Android App
+      - name: Build Android APK
+        run: briefcase create && briefcase build && briefcase package
+      - name: Rename & Upload Artifact
         run: |
-          briefcase create android
-          briefcase build android
-          briefcase package android --p apk
-      - name: Find APK file
-        run: |
-          echo "正在查找生成的 APK 文件..."
-          find build -name "*.apk"
-          cp $(find build -name "*.apk" | head -n 1) Nexus-Chat-Android.apk || echo "未找到APK"
-      - name: Upload Android Artifact
-        uses: actions/upload-artifact@v4
+          VER=${GITHUB_REF_NAME#v}
+          NEW_NAME="Nexus-Chat-Android-v${VER}.apk"
+          
+          # 查找生成的 apk 文件并重命名
+          FILE=$(find build -name "*.apk" | head -n 1)
+          if [ -f "$FILE" ]; then
+              cp "$FILE" "$NEW_NAME"
+              echo "Renamed to: $NEW_NAME"
+          else
+              echo "APK file not found!"
+              exit 1
+          fi
+      - uses: actions/upload-artifact@v4
         with:
-          name: Nexus-Chat-Android
-          path: Nexus-Chat-Android.apk
-          if-no-files-found: error
+          name: android-apk
+          path: Nexus-Chat-Android-v*.apk
 
   # ================= 创建 Release =================
-  # 依赖所有构建 Job，负责下载文件、计算 SHA256 并创建 Release
   create-release:
     needs: [build-windows, build-macos, build-android]
     runs-on: ubuntu-latest
+    permissions:
+      contents: write
     steps:
-      - name: Get version info
-        id: get_version
-        run: |
-          TAG="${{ github.ref }}"
-          TAG=${TAG##*/}
-          VERSION=${TAG#v}
-          echo "version=$VERSION" >> $GITHUB_OUTPUT
-          echo "tag=$TAG" >> $GITHUB_OUTPUT
-
-      - name: Download Artifacts
-        uses: actions/download-artifact@v4
+      - uses: actions/checkout@v4
+      
+      # 1. 下载所有构建产物
+      - uses: actions/download-artifact@v4
         with:
-          path: dist/
+          path: dist
+          merge-multiple: true
 
+      # 2. 计算哈希值
       - name: Generate Checksums
-        id: generate_checksums
+        id: checksum
         run: |
           cd dist
-          # 创建校验和文件
-          > checksums.txt
-          
-          # 查找并计算所有安装包的哈希值
-          find . -type f \( -name "*.apk" -o -name "*.aab" -o -name "*.dmg" -o -name "*.msi" -o -name "*.exe" \) -exec sha256sum {} \; >> checksums.txt
-          
-          # 将校验和文件内容设置为步骤输出，供后续 Job 使用
-          echo "checksum_body<<EOF" >> $GITHUB_OUTPUT
+          sha256sum *.msi *.dmg *.apk > checksums.txt
           cat checksums.txt
+          
+          # 将内容存入环境变量供后续使用
+          HASH_BODY=$(cat checksums.txt)
+          echo "hash_body<<EOF" >> $GITHUB_OUTPUT
+          echo "$HASH_BODY" >> $GITHUB_OUTPUT
           echo "EOF" >> $GITHUB_OUTPUT
 
+      # 3. 创建 Release (修复了 tag -> tag_name)
       - name: Create Release
-        # 使用更现代、更可靠的 action-gh-release
-        uses: softprops/action-gh-release@v2 
-        env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        uses: softprops/action-gh-release@v2
         with:
-          tag: ${{ steps.get_version.outputs.tag }}
-          name: Nexus-Chat ${{ steps.get_version.outputs.version }}
+          tag_name: ${{ github.ref_name }}  # <--- 关键修复：这里必须是 tag_name
+          name: Nexus-Chat ${{ github.ref_name }}
           body: |
-            🚀 自动发布 v${{ steps.get_version.outputs.version }}
+            🚀 自动发布 ${{ github.ref_name }}
+            
+            ### 文件校验值 (SHA256):
+            ```text
+             $ {{ steps.checksum.outputs.hash_body }}
 
-            **文件校验值 (SHA256):**
-            \`\`\`
-            ${{ steps.generate_checksums.outputs.checksum_body }}
-            \`\`\`
-          # 自动上传 dist/ 目录下的所有文件
-          files: dist/**
+            ```
+          files: |
+            dist/*.msi
+            dist/*.dmg
+            dist/*.apk
+            dist/checksums.txt
+          draft: false
+          prerelease: true
 
+      
     # ================= 生成版本文件并推送到 NC-Updater =================
   generate-version-files:
     needs: [create-release]
