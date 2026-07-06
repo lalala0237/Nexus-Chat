@@ -95,57 +95,55 @@ jobs:
   #        name: android-apk
   #        path: Nexus-Chat-Android-v*.apk
 
-  build-android:
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v4
-      
-      - name: Set up Python
-        uses: actions/setup-python@v5
-        with:
-          python-version: '3.13'
-              
-      - name: Install Dependencies
-        run: |
-          pip install briefcase
-          sudo apt-get update
-          sudo apt-get install -y libc6-dev libffi-dev libssl-dev zlib1g-dev
-      - name: Build Android APK
-        run: |
-          # 使用 --no-input 避免交互，--update 确保资源同步
-          briefcase create android --no-input
-          briefcase build android --no-input
-          briefcase package android --no-input
-
-      # --- 核心修复：智能查找并重命名 APK ---
-      - name: Rename & Upload Artifact (Android)
-        run: |
-          VER=${GITHUB_REF_NAME#v}
-              
-          # 1. 使用 find 命令在整个项目中搜索 .apk 文件
-          # 排除掉 debug 版本，只找 release 文件夹下的
-          APK_PATH=$(find . -path "*/release/*.apk" -not -name "*unsigned*" | head -n 1)
-          
-          if [ -z "$APK_PATH" ]; then
-            echo "Error: No APK file found!"
-            exit 1
-          fi
-              
-          echo "Found APK at: $APK_PATH"
-              
-          # 2. 定义新文件名
-          NEW_NAME="Nexus-Chat-Android-v${VER}.apk"
-              
-          # 3. 复制并重命名到当前目录（方便后续上传）
-          cp "$APK_PATH" "./$NEW_NAME"
-              
-        shell: bash
-  
-      - name: Upload Android Artifact
-        uses: actions/upload-artifact@v4
-        with:
-          name: android-apk
-          path: Nexus-Chat-Android-*.apk
+      # ================= Android 构建 =================
+    build-android:
+      runs-on: ubuntu-latest
+      steps:
+        - uses: actions/checkout@v4
+        - name: Set up Python
+          uses: actions/setup-python@v5
+          with:
+            python-version: '3.13'
+        - name: Install Dependencies
+          run: |
+            pip install briefcase
+            sudo apt-get update
+            sudo apt-get install -y libc6-dev libffi-dev libssl-dev zlib1g-dev
+        - name: Build Android APK
+          run: |
+            # 使用 --no-input 避免交互，--update 确保资源同步
+            briefcase create android --no-input
+            briefcase build android --no-input
+            briefcase package android --no-input
+            
+            # --- 关键修复：增加文件查找和调试步骤 ---
+            echo "🔍 正在查找生成的 APK 文件..."
+            # 1. 列出 build 目录下所有 .apk 文件，方便我们确认路径
+            find build -name "*.apk" -ls
+            
+            # 2. 尝试找到 release 版本的 APK (排除 unsigned 的)
+            APK_PATH=$(find build -path "*/release/*.apk" -not -name "*unsigned*" | head -n 1)
+            
+            if [ -z "$APK_PATH" ]; then
+              echo "❌ 错误：未找到 Release 版本的 APK 文件！"
+              exit 1
+            fi
+            
+            echo "✅ 找到 APK: $APK_PATH"
+            
+            # 3. 获取版本号
+            VER=${GITHUB_REF_NAME#v}
+            NEW_NAME="Nexus-Chat-Android-v${VER}.apk"
+            
+            # 4. 复制到项目根目录并重命名
+            cp "$APK_PATH" "./$NEW_NAME"
+            echo "📦 已复制并重命名为: $NEW_NAME"
+            
+        - name: Upload Android Artifact
+          uses: actions/upload-artifact@v4
+          with:
+            name: android-apk
+            path: Nexus-Chat-Android-*.apk
   # ================= 创建 Release =================
   create-release:
     needs: [build-windows, build-macos, build-android]
@@ -269,34 +267,83 @@ jobs:
             -o old_history.json 2>/dev/null || echo "" > old_history.json
 
       # 5. 生成带注释的 version_history.json (重构拼接逻辑)
+              # 5. 生成带注释的 version_history.json (使用 jq 重构)
       - name: Generate version_history.json
         run: |
+          # --- 安装 jq 工具 ---
+          sudo apt-get update && sudo apt-get install -y jq
+          
           VERSION="${{ steps.get_info.outputs.version }}"
           TAG="${{ steps.get_info.outputs.tag }}"
           REPO="${{ github.repository }}"
           NOW=$(TZ=Asia/Shanghai date '+%Y-%m-%d %H:%M:%S CST')
           
-          # 判断是否为预发布
+          # --- 判断是否为预发布 ---
           IS_PRE="false"
           VER_TYPE="正式版本 (Stable)"
           VER_WARN="// ✅ 此版本为正式发布版本，推荐所有用户更新"
-          if [[ "$VERSION" == *"-"* ]]; then
+          if [[ "$VERSION" == *"rc"* ]]; then
             IS_PRE="true"
             VER_TYPE="预发布版本 (Prerelease)"
             VER_WARN="// ⚠️ 注意：此版本为预发布版本，可能包含未修复的 Bug，仅供测试使用"
           fi
-
-          # --- A. 写入文件头注释 ---
-          cat > version_history.json << 'HEADER'
+          
+          # --- A. 创建新版本的 JSON 对象 ---
+          # 使用 jq 来构建一个完美的 JSON 对象，不用担心引号和格式问题
+          NEW_VERSION_JSON=$(jq -n \
+            --arg ver "$VERSION" \
+            --arg date "$NOW" \
+            --argjson is_pre "$IS_PRE" \
+            --arg tag "$TAG" \
+            --arg repo "$REPO" \
+            --arg win_hash "$windows_hash" \
+            --arg mac_hash "$macos_hash" \
+            --arg and_hash "$android_hash" \
+            '{
+              version: $ver,
+              release_date: $date,
+              is_prerelease: $is_pre,
+              tag_name: $tag,
+              release_page: "https://github.com/\($repo)/releases/tag/\($tag)",
+              downloads: {
+                windows: "https://github.com/\($repo)/releases/download/\($tag)/Nexus-Chat-Windows-\($ver).msi",
+                macos: "https://github.com/\($repo)/releases/download/\($tag)/Nexus-Chat-MacOS-\($ver).dmg",
+                android: "https://github.com/\($repo)/releases/download/\($tag)/Nexus-Chat-Android-\($ver).apk"
+              },
+              checksums: {
+                windows: $win_hash,
+                macos: $mac_hash,
+                android: $and_hash
+              }
+            }')
+          
+          # --- B. 生成最终文件 ---
+          {
+            # 1. 写入文件头注释
+            cat << 'HEADER'
           // ====================================================================
           //  Nexus Chat - 版本发布历史记录文件 (Version Release History)
-          // ... (此处省略你的长注释，保持原样即可) ...
           // ====================================================================
-
+          //
+          //  【文件用途】
+          //    本文件完整记录了 Nexus Chat 项目自首次发布以来的所有版本发布信息。
+          //    供客户端「历史版本」页面展示，以及版本回溯、问题排查使用。
+          //
+          //  【文件维护方式】
+          //    本文件由 GitHub Actions 自动化工作流 (release.yml) 在每次成功构建
+          //    并创建 Release 后自动更新。请勿手动编辑本文件，手动修改将在下次
+          //    自动发布时被覆盖。
+          //
+          //  【文件格式说明】
+          //    - 文件顶部的 "//" 开头行为注释，不会被 JSON 解析器读取
+          //    - JSON 数据部分（"history" 数组）为纯 JSON，可被标准解析器正常读取
+          //    - 客户端 updater.py 使用正则去除 "//" 注释行后再进行 JSON 解析
+          //
+          // ====================================================================
           HEADER
 
-          # --- B. 写入当前版本的注释块 ---
-          cat >> version_history.json << EOF
+            # 2. 写入当前版本的注释块
+            cat << EOF
           // --------------------------------------------------------------------
           //  版本: $TAG ($VER_TYPE)
           //  发布时间: $NOW
@@ -306,43 +353,27 @@ jobs:
           // --------------------------------------------------------------------
           EOF
 
-          # --- C. 写入当前版本的 JSON 数据 (注意结尾有逗号，因为后面还要接旧的) ---
-          cat >> version_history.json << EOF
-          {
-            "history": [
-              {
-                "version": "$VERSION",
-                "release_date": "$NOW",
-                "is_prerelease": $IS_PRE,
-                "tag_name": "$TAG",
-                "release_page": "https://github.com/$REPO/releases/tag/$TAG",
-                "downloads": {
-                  "windows": "https://github.com/$REPO/releases/download/$TAG/Nexus-Chat-Windows-$VERSION.msi",
-                  "macos": "https://github.com/$REPO/releases/download/$TAG/Nexus-Chat-MacOS-$VERSION.dmg",
-                  "android": "https://github.com/$REPO/releases/download/$TAG/Nexus-Chat-Android-$VERSION.apk"
-                },
-                "checksums": {
-                  "windows": "$windows_hash",
-                  "macos": "$macos_hash",
-                  "android": "$android_hash"
-                }
-              },
-          EOF
-
-          # --- D. 安全地合并旧数据 ---
-          if [ -s old_history.json ]; then
-            # 1. 去除旧文件中的所有注释行 (// 开头)
-            # 2. 去除第一行 ({) 和最后一行 (})
-            # 3. 去除首尾空白
-            grep -v '^\s*//' old_history.json | sed '1d;$d' | sed '/./,$!d' >> version_history.json
-          fi
-
-          # --- E. 闭合 JSON ---
-          echo "  ]" >> version_history.json
-          echo "}" >> version_history.json
-
+            # 3. 开始写入 JSON 结构
+            echo "{"
+            echo '  "history": ['
+            
+            # 4. 写入新版本数据 (jq 生成的已经是格式化好的 JSON)
+            echo "    $NEW_VERSION_JSON,"
+            
+            # 5. 合并旧数据
+            if [ -s old_history.json ]; then
+              # 提取旧文件中的 history 数组内容，并去掉首尾的 []
+              # 然后用 sed 给每一行前面加 4 个空格来保持缩进
+              grep -v '^\s*//' old_history.json | jq '.history' | sed '1d;$d' | sed 's/^/    /'
+            fi
+            
+            # 6. 闭合 JSON 结构
+            echo "  ]"
+            echo "}"
+            
+          } > version_history.json
+          
           echo "✅ version_history.json generated successfully."
-
       # 6. 推送到 NC-Updater 仓库
       - name: Push to NC-Updater
         env:
