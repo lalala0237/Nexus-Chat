@@ -96,54 +96,54 @@ jobs:
   #        path: Nexus-Chat-Android-v*.apk
 
       # ================= Android 构建 =================
-    build-android:
-      runs-on: ubuntu-latest
-      steps:
-        - uses: actions/checkout@v4
-        - name: Set up Python
-          uses: actions/setup-python@v5
-          with:
-            python-version: '3.13'
-        - name: Install Dependencies
-          run: |
-            pip install briefcase
-            sudo apt-get update
-            sudo apt-get install -y libc6-dev libffi-dev libssl-dev zlib1g-dev
-        - name: Build Android APK
-          run: |
-            # 使用 --no-input 避免交互，--update 确保资源同步
-            briefcase create android --no-input
-            briefcase build android --no-input
-            briefcase package android --no-input
-            
-            # --- 关键修复：增加文件查找和调试步骤 ---
-            echo "🔍 正在查找生成的 APK 文件..."
-            # 1. 列出 build 目录下所有 .apk 文件，方便我们确认路径
-            find build -name "*.apk" -ls
-            
-            # 2. 尝试找到 release 版本的 APK (排除 unsigned 的)
-            APK_PATH=$(find build -path "*/release/*.apk" -not -name "*unsigned*" | head -n 1)
-            
-            if [ -z "$APK_PATH" ]; then
-              echo "❌ 错误：未找到 Release 版本的 APK 文件！"
-              exit 1
-            fi
-            
-            echo "✅ 找到 APK: $APK_PATH"
-            
-            # 3. 获取版本号
-            VER=${GITHUB_REF_NAME#v}
-            NEW_NAME="Nexus-Chat-Android-v${VER}.apk"
-            
-            # 4. 复制到项目根目录并重命名
-            cp "$APK_PATH" "./$NEW_NAME"
-            echo "📦 已复制并重命名为: $NEW_NAME"
-            
-        - name: Upload Android Artifact
-          uses: actions/upload-artifact@v4
-          with:
-            name: android-apk
-            path: Nexus-Chat-Android-*.apk
+  build-android:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.13'
+      - name: Install Dependencies
+        run: |
+          pip install briefcase
+          sudo apt-get update
+          sudo apt-get install -y libc6-dev libffi-dev libssl-dev zlib1g-dev
+      - name: Build Android APK
+        run: |
+          # 使用 --no-input 避免交互，--update 确保资源同步
+          briefcase create android --no-input
+          briefcase build android --no-input
+          briefcase package android --no-input
+          
+          # --- 关键修复：增加文件查找和调试步骤 ---
+          echo "🔍 正在查找生成的 APK 文件..."
+          # 1. 列出 build 目录下所有 .apk 文件，方便我们确认路径
+          find build -name "*.apk" -ls
+          
+          # 2. 尝试找到 release 版本的 APK (排除 unsigned 的)
+          APK_PATH=$(find build -path "*/release/*.apk" -not -name "*unsigned*" | head -n 1)
+          
+          if [ -z "$APK_PATH" ]; then
+            echo "❌ 错误：未找到 Release 版本的 APK 文件！"
+            exit 1
+          fi
+          
+          echo "✅ 找到 APK: $APK_PATH"
+          
+          # 3. 获取版本号
+          VER=${GITHUB_REF_NAME#v}
+          NEW_NAME="Nexus-Chat-Android-v${VER}.apk"
+          
+          # 4. 复制到项目根目录并重命名
+          cp "$APK_PATH" "./$NEW_NAME"
+          echo "📦 已复制并重命名为: $NEW_NAME"
+          
+      - name: Upload Android Artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: android-apk
+          path: Nexus-Chat-Android-*.apk
   # ================= 创建 Release =================
   create-release:
     needs: [build-windows, build-macos, build-android]
