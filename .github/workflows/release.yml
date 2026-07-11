@@ -1,4 +1,4 @@
-name: Build and Release Nexus-Chat
+报name: Build and Release Nexus-Chat
 
 on:
   workflow_dispatch:
@@ -121,8 +121,8 @@ jobs:
           # 1. 列出 build 目录下所有 .apk 文件，方便我们确认路径
           find build -name "*.apk" -ls
           
-          # 2. 尝试找到 release 版本的 APK (排除 unsigned 的)
-          APK_PATH=$(find build -path "*/release/*.apk" -not -name "*unsigned*" | head -n 1)
+          # 2. 尝试找到 APK
+          APK_PATH=$(find build -name "*.apk" -type f | head -n 1)
           
           if [ -z "$APK_PATH" ]; then
             echo "❌ 错误：未找到 Release 版本的 APK 文件！"
