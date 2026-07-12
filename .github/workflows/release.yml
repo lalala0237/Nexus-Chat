@@ -1,4 +1,4 @@
-报name: Build and Release Nexus-Chat
+name: Build and Release Nexus-Chat
 
 on:
   workflow_dispatch:
