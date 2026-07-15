@@ -2,7 +2,7 @@
 [tool.briefcase]
 project_name = "nexuschat"
 bundle = "com.nexus.chat.app"
-version = "1.0.0rc1"
+version = "1.0.0rc2"
 url = "https://app.chat.nexus.com/nexus_chat"
 license = "BSD-3-Clause"
 license-files = ["LICENSE"]
@@ -179,7 +179,7 @@ requires = [
     "toga-android~=0.5.0",
 ]
 
-base_theme = "Theme.MaterialComponents.Light.DarkActionBar"
+base_theme = "Theme.MaterialComponents.Light.NoActionBar"
 
 build_gradle_dependencies = [
     "com.google.android.material:material:1.13.0",
