@@ -58,19 +58,28 @@ class ChatInterface:
         )
 
         # --- 布局优化：将按钮和输入框分开 ---
-        # 按钮行
-        button_box = toga.Box(
-            children=[self.settings_button, self.new_chat_button, self.send_button],
-            style=Pack(direction=ROW, margin_bottom=5)
+        # --- 布局优化：适配移动端 ---
+        
+        # 1. 顶部按钮行：只放 Settings 和 New Chat
+        top_button_box = toga.Box(
+            children=[self.settings_button, self.new_chat_button],
+            style=Pack(direction=ROW, margin=(15, 5, 5, 5))
         )
-        # 输入框行
-        input_box = toga.Box(
-            children=[self.message_input],
-            style=Pack(margin_top=5)
+
+        # 2. 输入框行：将输入框和发送按钮放在同一行
+        # 给输入框 flex=1，让它自动占满剩余空间
+        self.message_input.style = Pack(flex=1, margin=(5, 5, 15, 5), padding=5)
+        # 给发送按钮一个固定宽度，并设置背景色
+        self.send_button.style = Pack(width=80, margin=(5, 5, 15, 5), padding=5, background_color="#007AFF", color="white")
+        
+        input_send_box = toga.Box(
+            children=[self.message_input, self.send_button],
+            style=Pack(direction=ROW, margin=(0, 0, 0, 0))
         )
-        # 主内容框
+
+        # 3. 主内容框：按新顺序组合
         main_box = toga.Box(
-            children=[self.chat_display, button_box, input_box],
+            children=[self.chat_display, top_button_box, input_send_box],
             style=Pack(direction=COLUMN, flex=1)
         )
 
