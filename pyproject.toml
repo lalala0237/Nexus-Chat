@@ -2,7 +2,7 @@
 [tool.briefcase]
 project_name = "nexuschat"
 bundle = "com.nexus.chat.app"
-version = "1.0.0rc2"
+version = "1.0.0rc1"
 url = "https://app.chat.nexus.com/nexus_chat"
 license = "BSD-3-Clause"
 license-files = ["LICENSE"]
