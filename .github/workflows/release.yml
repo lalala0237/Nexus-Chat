@@ -184,7 +184,7 @@ jobs:
             
             ### 文件校验值 (SHA256):
             ```text
-             $ {{ steps.checksum.outputs.hash_body }}
+             ${{ steps.checksum.outputs.hash_body }}
 
             ```
           files: |
